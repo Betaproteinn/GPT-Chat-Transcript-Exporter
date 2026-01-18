@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title> GPT Chat Transcript Exporter V1.1</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class', // 关键：开启 class 模式
+            theme: {
+                extend: {
+                    colors: {
+                        bili: {
+                            DEFAULT: '#FB7299', // 主粉色
+                            hover: '#FF85A7',   // 悬停亮粉
+                            light: '#FEF0F5',   // 极淡的粉背景 (日间)
+                            dark: '#E4668B',    // 深一点的粉
+                            darkbg: '#3f2c33'   // 夜间模式下的淡粉背景
+                        },
+                        dark: {
+                            bg: '#18181b',      // Zinc 900
+                            card: '#27272a',    // Zinc 800
+                            border: '#3f3f46',  // Zinc 700
+                            text: '#f4f4f5',    // Zinc 100
+                            textsec: '#a1a1aa'  // Zinc 400
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #f6f7f9;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            overflow: hidden; 
+            transition: background-color 0.3s;
+        }
+        /* Dark Mode Body Background */
+        .dark body {
+            background-color: #18181b;
+        }
+
+        .drop-zone {
+            transition: all 0.2s ease;
+        }
+        .drop-zone.active {
+            border-color: #FB7299;
+            background-color: #FEF0F5;
+            transform: scale(1.01);
+        }
+        .dark .drop-zone.active {
+            background-color: #3f2c33; /* 夜间模式下的拖拽激活色 */
+            border-color: #FB7299;
+        }
+
+        /* 紧凑列表样式 */
+        .file-row {
+            transition: background-color 0.1s;
+            user-select: none; 
+        }
+        .file-row:hover {
+            background-color: #FEF0F5; 
+        }
+        .dark .file-row:hover {
+            background-color: #3f3f46; /* Dark Hover */
+        }
+        .file-row.selected {
+            background-color: #FFEBF0; 
+        }
+        .dark .file-row.selected {
+            background-color: #3f2c33; /* Dark Selected */
+        }
+
+        .custom-checkbox {
+            cursor: pointer;
+            width: 16px;
+            height: 16px;
+            accent-color: #FB7299; 
+        }
+        /* 滚动条样式 */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1; 
+            border-radius: 3px;
+        }
+        .dark ::-webkit-scrollbar-thumb {
+            background: #52525b; /* Dark Scrollbar */
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8; 
+        }
+        
+        /* 侧边栏样式 */
+        .sidebar-item {
+            position: relative;
+            transition: all 0.2s;
+        }
+        .sidebar-item:hover {
+            background-color: #FEF0F5;
+            color: #FB7299;
+        }
+        .dark .sidebar-item:hover {
+            background-color: #27272a;
+            color: #FB7299;
+        }
+        .sidebar-item.active {
+            background-color: #FEF0F5; 
+            color: #FB7299; 
+        }
+        .dark .sidebar-item.active {
+            background-color: #27272a; /* Dark Active */
+            color: #FB7299;
+        }
+        .sidebar-item.active::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background-color: #FB7299; 
+        }
+
+        /* 模态框动画 */
+        @keyframes zoomIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .animate-zoom-in {
+            animation: zoomIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        
+        /* 设置菜单弹出动画 */
+        @keyframes popUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-pop-up {
+            animation: popUp 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+    </style>
+</head>
+<body class="antialiased">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useRef, useEffect } = React;
+
+        // --- 翻译字典 ---
+        const translations = {
+            zh: {
+                appTitle: "GPT Chat Transcript\nExporter",
+                menuConvert: "聊天文件转换",
+                footer: "© Betaproteinn",
+                listTitle: "文件列表",
+                fileCount: "{n} 个文件",
+                addFile: "添加文件",
+                delete: "删除 ({n})",
+                start: "开始转换 ({n})",
+                processing: "处理中",
+                download: "下载结果",
+                dropTitle: "点击或拖拽文件到这里",
+                dropSub: "支持批量选择 Markdown (.md) 文件",
+                headerSeq: "序号",
+                headerName: "文件名 (双击预览)",
+                headerSize: "大小",
+                headerStatus: "状态",
+                headerAction: "操作",
+                statusIdle: "待处理",
+                statusProcessing: "转换中...",
+                statusSuccess: "成功",
+                statusError: "失败",
+                selectedMsg: "已选中 {n} 个文件",
+                totalMsg: "共 {n} 个文件",
+                clear: "清空列表",
+                previewTitle: "源代码预览 (Markdown)",
+                close: "关闭 (Esc)",
+                downloadCurrent: "下载当前",
+                loading: "正在加载文件内容...",
+                settings: "设置",
+                appearance: "外观",
+                language: "语言"
+            },
+            en: {
+                appTitle: "GPT Chat Transcript\nExporter",
+                menuConvert: "Converter",
+                footer: "© 2025 Tools",
+                listTitle: "File List",
+                fileCount: "{n} Files",
+                addFile: "Add Files",
+                delete: "Delete ({n})",
+                start: "Convert ({n})",
+                processing: "Processing",
+                download: "Download All",
+                dropTitle: "Drop files here or click",
+                dropSub: "Supports Markdown (.md) files",
+                headerSeq: "#",
+                headerName: "Filename (Double click)",
+                headerSize: "Size",
+                headerStatus: "Status",
+                headerAction: "Action",
+                statusIdle: "Idle",
+                statusProcessing: "Converting...",
+                statusSuccess: "Success",
+                statusError: "Failed",
+                selectedMsg: "{n} Selected",
+                totalMsg: "{n} Total",
+                clear: "Clear All",
+                previewTitle: "Source Preview (Markdown)",
+                close: "Close (Esc)",
+                downloadCurrent: "Download",
+                loading: "Loading content...",
+                settings: "Settings",
+                appearance: "Theme",
+                language: "Language"
+            },
+            jp: {
+                appTitle: "GPT Chat Transcript\nExporter",
+                menuConvert: "ファイル変換",
+                footer: "© 2025 Tools",
+                listTitle: "ファイル一覧",
+                fileCount: "{n} ファイル",
+                addFile: "ファイル追加",
+                delete: "削除 ({n})",
+                start: "変換開始 ({n})",
+                processing: "処理中",
+                download: "一括保存",
+                dropTitle: "クリックまたはドラッグ",
+                dropSub: "Markdown (.md) ファイルに対応",
+                headerSeq: "No.",
+                headerName: "ファイル名 (ダブルクリックでプレビュー)",
+                headerSize: "サイズ",
+                headerStatus: "状態",
+                headerAction: "操作",
+                statusIdle: "待機中",
+                statusProcessing: "変換中...",
+                statusSuccess: "完了",
+                statusError: "失敗",
+                selectedMsg: "{n} 件選択中",
+                totalMsg: "全 {n} 件",
+                clear: "リストを空にする",
+                previewTitle: "ソースプレビュー (Markdown)",
+                close: "閉じる (Esc)",
+                downloadCurrent: "保存",
+                loading: "読み込み中...",
+                settings: "設定",
+                appearance: "外観",
+                language: "言語"
+            }
+        };
+
+        // --- Icons ---
+        const Icons = {
+            Sun: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>,
+            Moon: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>,
+            System: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>,
+            Gear: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>,
+            Logo: () => (
+                <svg width="32" height="32" viewBox="0 0 100 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M50 0C22.3858 0 0 22.3858 0 50H100C100 22.3858 77.6142 0 50 0Z" fill="#F97316"/>
+                    <circle cx="35" cy="35" r="12" fill="white"/>
+                    <circle cx="65" cy="35" r="12" fill="white"/>
+                </svg>
+            )
+        };
+
+        const App = () => {
+            // --- Global State ---
+            const [lang, setLang] = useState(() => localStorage.getItem('app_lang') || 'zh');
+            const [theme, setTheme] = useState(() => localStorage.getItem('app_theme') || 'light'); // 'light' | 'dark' | 'system'
+            const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+            const [files, setFiles] = useState([]);
+            const [selectedIds, setSelectedIds] = useState(new Set());
+            const [isDragging, setIsDragging] = useState(false);
+            const [isConverting, setIsConverting] = useState(false);
+            const fileInputRef = useRef(null);
+            const settingsRef = useRef(null);
+
+            // Preview State
+            const [previewTarget, setPreviewTarget] = useState(null);
+            const [previewContent, setPreviewContent] = useState("");
+            const [previewZoom, setPreviewZoom] = useState(1);
+
+            // 翻译辅助函数
+            const t = (key, params = {}) => {
+                let str = translations[lang][key] || key;
+                Object.keys(params).forEach(k => {
+                    str = str.replace(`{${k}}`, params[k]);
+                });
+                return str;
+            };
+
+            // --- Theme Effect ---
+            useEffect(() => {
+                const root = document.documentElement;
+                const applyTheme = (t) => {
+                    if (t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                        root.classList.add('dark');
+                    } else {
+                        root.classList.remove('dark');
+                    }
+                };
+                applyTheme(theme);
+                localStorage.setItem('app_theme', theme);
+                
+                // 监听系统变化
+                if (theme === 'system') {
+                    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+                    const handleChange = (e) => applyTheme('system');
+                    mediaQuery.addEventListener('change', handleChange);
+                    return () => mediaQuery.removeEventListener('change', handleChange);
+                }
+            }, [theme]);
+
+            // Save Lang
+            useEffect(() => {
+                localStorage.setItem('app_lang', lang);
+            }, [lang]);
+
+            // 点击外部关闭设置
+            useEffect(() => {
+                const handleClickOutside = (event) => {
+                    if (settingsRef.current && !settingsRef.current.contains(event.target)) {
+                        setIsSettingsOpen(false);
+                    }
+                };
+                if (isSettingsOpen) document.addEventListener('mousedown', handleClickOutside);
+                return () => document.removeEventListener('mousedown', handleClickOutside);
+            }, [isSettingsOpen]);
+
+
+            // --- Core Logic (unchanged but translated) ---
+            const isMetadataLine = (line) => {
+                const lower = line.toLowerCase();
+                return (lower.startsWith('**user:**') || lower.startsWith('**created:**') || lower.startsWith('**updated:**') || lower.startsWith('**exported:**') || lower.startsWith('**link:**') || lower.startsWith('**model:**'));
+            };
+
+            const generateOfficialHtml = (mdText) => {
+                const lines = mdText.split('\n');
+                let title = "Chat Log";
+                let segments = [];
+                let currentSegment = null;
+                let isHeaderFound = false;
+
+                for (let i = 0; i < lines.length; i++) {
+                    let line = lines[i].trimEnd(); 
+                    if (!isHeaderFound && line.startsWith('# ')) {
+                        title = line.replace('# ', '').trim();
+                        isHeaderFound = true;
+                        continue;
+                    }
+                    if (line.startsWith('## Prompt:') || line.startsWith('## User:') || line.startsWith('**User:**')) {
+                        if (currentSegment) segments.push(currentSegment);
+                        currentSegment = { role: 'user', lines: [] };
+                        if (line.startsWith('##')) continue; 
+                    }
+                    if (line.startsWith('## Response:') || line.startsWith('## ChatGPT:') || line.startsWith('**ChatGPT:**')) {
+                        if (currentSegment) segments.push(currentSegment);
+                        currentSegment = { role: 'ChatGPT', lines: [] };
+                        if (line.startsWith('##')) continue;
+                    }
+                    if (!currentSegment && line.trim() !== "") {
+                        if (isMetadataLine(line)) continue;
+                        else currentSegment = { role: 'ChatGPT', lines: [] };
+                    }
+                    if (currentSegment) currentSegment.lines.push(line);
+                }
+                if (currentSegment) segments.push(currentSegment);
+
+                let htmlBodyContent = "";
+                segments.forEach(seg => {
+                    htmlBodyContent += `\n<p class="p2"><span class="s1"><b>${seg.role}</b></span></p>`;
+                    seg.lines.forEach(l => {
+                        const safeLine = l === "" ? "" : l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+                        htmlBodyContent += `\n<p class="p2"><span class="s1">${safeLine}</span></p>`;
+                    });
+                    htmlBodyContent += `\n<p class="p3"><span class="s1"></span><br></p>`;
+                });
+
+                return `<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta http-equiv="Content-Style-Type" content="text/css">
+  <title>${title}</title>
+  <style type="text/css">p.p2 {margin: 0; font: 13.0px Courier} p.p3 {margin: 0; min-height: 16.0px} span.s1 {font-kerning: none}</style>
+</head>
+<body>
+<h4 style="margin: 0; font: 12.0px Helvetica"><b>${title}</b></h4>${htmlBodyContent}
+</body></html>`;
+            };
+
+            const addFilesToQueue = (fileList) => {
+                const newFiles = Array.from(fileList).filter(f => f.name.endsWith('.md')).map(f => ({
+                    id: Date.now() + Math.random().toString(36).substr(2, 9),
+                    fileObject: f, originalName: f.name, newName: f.name.replace(/\.md$/i, '') + "-converted.html",
+                    size: (f.size / 1024).toFixed(1) + ' KB', status: 'idle', content: null, errorMsg: ''
+                }));
+                setFiles(prev => [...prev, ...newFiles]);
+            };
+
+            const startConversion = async () => {
+                setIsConverting(true);
+                const filesToProcess = files.filter(f => f.status === 'idle' || f.status === 'error');
+                for (let i = 0; i < filesToProcess.length; i++) {
+                    const targetId = filesToProcess[i].id;
+                    setFiles(prev => prev.map(f => f.id === targetId ? { ...f, status: 'processing' } : f));
+                    await new Promise(r => setTimeout(r, 50));
+                    try {
+                        const content = await new Promise((resolve) => {
+                            const reader = new FileReader();
+                            reader.onload = e => resolve(e.target.result);
+                            reader.readAsText(filesToProcess[i].fileObject);
+                        });
+                        setFiles(prev => prev.map(f => f.id === targetId ? { ...f, status: 'success', content: generateOfficialHtml(content) } : f));
+                    } catch (err) {
+                        setFiles(prev => prev.map(f => f.id === targetId ? { ...f, status: 'error', errorMsg: '失败' } : f));
+                    }
+                }
+                setIsConverting(false);
+            };
+
+            const handleDoubleClick = (file) => {
+                setPreviewTarget(file);
+                setPreviewZoom(1);
+                setPreviewContent(t('loading'));
+                const reader = new FileReader();
+                reader.onload = (e) => setPreviewContent(e.target.result);
+                reader.onerror = () => setPreviewContent(t('preview_error'));
+                reader.readAsText(file.fileObject);
+            };
+
+            const closePreview = () => {
+                setPreviewTarget(null);
+                setPreviewContent("");
+            };
+
+            const handleDownloadCurrent = () => {
+                if (previewTarget) saveAs(previewTarget.fileObject, previewTarget.originalName);
+            };
+
+            useEffect(() => {
+                const handleEsc = (e) => { if (e.key === 'Escape') closePreview(); };
+                if (previewTarget) window.addEventListener('keydown', handleEsc);
+                return () => window.removeEventListener('keydown', handleEsc);
+            }, [previewTarget]);
+
+            const toggleSelectAll = () => setSelectedIds(files.length > 0 && selectedIds.size === files.length ? new Set() : new Set(files.map(f => f.id)));
+            const toggleSelectOne = (id) => {
+                const newSet = new Set(selectedIds);
+                if (newSet.has(id)) newSet.delete(id); else newSet.add(id);
+                setSelectedIds(newSet);
+            };
+            const removeFile = (id) => {
+                setFiles(prev => prev.filter(f => f.id !== id));
+                const newSet = new Set(selectedIds); newSet.delete(id); setSelectedIds(newSet);
+            };
+            const removeSelected = () => {
+                setFiles(prev => prev.filter(f => !selectedIds.has(f.id)));
+                setSelectedIds(new Set());
+            };
+            const clearAll = () => { setFiles([]); setSelectedIds(new Set()); };
+            const downloadZip = async () => {
+                const zip = new JSZip();
+                let count = 0;
+                files.forEach(f => { if (f.status === 'success' && f.content) { zip.file(f.newName, f.content); count++; } });
+                if (count === 0) return alert(t('statusError')); // Simplification
+                const content = await zip.generateAsync({type:"blob"});
+                saveAs(content, `converted_logs_${new Date().toISOString().slice(0,10)}.zip`);
+            };
+
+            const idleCount = files.filter(f => f.status === 'idle').length;
+            const successCount = files.filter(f => f.status === 'success').length;
+            const hasFiles = files.length > 0;
+            const isAllSelected = files.length > 0 && selectedIds.size === files.length;
+
+            // --- UI Components ---
+            
+            // Settings Popover Button Component
+            const SettingsButton = ({ label, active, onClick, icon: Icon }) => (
+                <button 
+                    onClick={onClick}
+                    className={`flex items-center justify-center p-2 rounded-md transition-all ${
+                        active 
+                        ? 'bg-bili text-white shadow-sm' 
+                        : 'bg-gray-100 dark:bg-dark-border text-gray-600 dark:text-dark-textsec hover:bg-gray-200 dark:hover:bg-gray-600'
+                    }`}
+                    title={label}
+                >
+                    {Icon ? <Icon /> : <span className="text-xs font-bold">{label}</span>}
+                </button>
+            );
+
+            return (
+                <div className="flex h-screen w-full bg-gray-50 dark:bg-dark-bg text-gray-800 dark:text-dark-text transition-colors duration-300">
+                    
+                    {/* 预览模态框 */}
+                    {previewTarget && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm transition-opacity" onClick={closePreview}>
+                            <div className="bg-white dark:bg-dark-card w-[90vw] h-[85vh] rounded-xl shadow-2xl flex flex-col overflow-hidden animate-zoom-in relative border dark:border-dark-border" onClick={e => e.stopPropagation()}>
+                                <div className="h-14 border-b border-gray-200 dark:border-dark-border flex items-center justify-between px-6 bg-gray-50/80 dark:bg-dark-bg/80 backdrop-blur flex-shrink-0 z-10">
+                                    <button onClick={closePreview} className="text-gray-500 dark:text-dark-textsec hover:text-gray-800 dark:hover:text-dark-text hover:bg-gray-200/50 dark:hover:bg-white/10 px-3 py-1.5 rounded-md text-sm font-medium transition flex items-center gap-1">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                        {t('close')}
+                                    </button>
+                                    <div className="flex flex-col items-center">
+                                        <span className="font-semibold text-gray-800 dark:text-dark-text text-sm truncate max-w-md">{previewTarget.originalName}</span>
+                                        <span className="text-[10px] text-gray-400 dark:text-gray-500">{t('previewTitle')}</span>
+                                    </div>
+                                    <button onClick={handleDownloadCurrent} className="text-bili hover:bg-bili-light dark:hover:bg-white/5 px-3 py-1.5 rounded-md text-sm font-medium transition flex items-center gap-1 border border-transparent hover:border-bili/20">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                        {t('downloadCurrent')}
+                                    </button>
+                                </div>
+                                <div className="flex-1 overflow-auto bg-white dark:bg-[#1e1e1e] relative p-8">
+                                     <div style={{ transform: `scale(${previewZoom})`, transformOrigin: 'top center', transition: 'transform 0.1s ease-out' }} className="mx-auto max-w-4xl">
+                                        <pre className="whitespace-pre-wrap font-mono text-sm text-gray-800 dark:text-gray-300 leading-relaxed p-4 border border-dashed border-gray-200 dark:border-dark-border rounded-lg bg-gray-50/50 dark:bg-black/20 min-h-[50vh]">{previewContent}</pre>
+                                     </div>
+                                </div>
+                                <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-white/90 dark:bg-dark-card/90 backdrop-blur border border-gray-200 dark:border-dark-border shadow-xl rounded-full px-4 py-2 flex items-center gap-4 z-20 text-gray-500 dark:text-gray-400">
+                                    <button onClick={() => setPreviewZoom(z => Math.max(0.5, z - 0.1))} className="w-6 h-6 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-white/10 rounded-full transition"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+                                    <span className="text-xs font-mono w-10 text-center select-none">{Math.round(previewZoom * 100)}%</span>
+                                    <button onClick={() => setPreviewZoom(z => Math.min(2.5, z + 0.1))} className="w-6 h-6 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-white/10 rounded-full transition"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* --- 左侧导航栏 --- */}
+                    <div className="w-48 bg-white dark:bg-dark-card flex flex-col flex-shrink-0 border-r border-gray-200 dark:border-dark-border z-20 transition-colors duration-300">
+                        <div className="h-20 flex items-center gap-3 px-4 border-b border-gray-100 dark:border-dark-border bg-white dark:bg-dark-card transition-colors duration-300">
+                            {/* Logo：缩小一点 + 放进圆角底 */}
+                            <div className="w-10 h-10 rounded-xl bg-bili-light dark:bg-bili/10 flex items-center justify-center flex-shrink-0">
+                                <div className="scale-[0.85]">
+                                    <Icons.Logo />
+                                </div>
+                            </div>
+
+                            {/* 标题：两行更稳，字重/行高更像产品 */}
+                            <div className="flex flex-col min-w-0">
+                            <span className="text-gray-900 dark:text-dark-text font-bold text-[13px] leading-snug tracking-tight whitespace-pre-line">
+                                {t('appTitle')}
+                            </span>
+                            </div>
+
+                            {/* 版本号：贴右上角，尺寸更协调 */}
+                            <span className="ml-auto text-[11px] font-bold text-bili bg-bili-light dark:bg-bili/10 px-2 py-1 rounded-lg border border-bili/30 flex-shrink-0">
+                                V1
+                            </span>
+                        </div>
+                        
+                        <div className="flex-1 py-4 overflow-y-auto">
+                            <nav className="space-y-1">
+                                <a href="#" className="sidebar-item active group flex items-center px-4 py-2.5 text-sm font-medium">
+                                    <svg className="mr-3 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+                                    </svg>
+                                    {t('menuConvert')}
+                                </a>
+                            </nav>
+                        </div>
+                        
+                        {/* 底部设置区域 */}
+                        <div className="p-4 border-t border-gray-100 dark:border-dark-border relative" ref={settingsRef}>
+                            {/* 设置气泡菜单 */}
+                            {isSettingsOpen && (
+                                <div className="absolute bottom-full left-2 mb-2 w-44 bg-white dark:bg-dark-card rounded-lg shadow-xl border border-gray-200 dark:border-dark-border p-3 animate-pop-up z-50">
+                                    
+                                    {/* 外观设置 */}
+                                    <div className="mb-3">
+                                        <div className="text-[10px] text-gray-400 dark:text-gray-500 font-bold mb-2 uppercase">{t('appearance')}</div>
+                                        <div className="grid grid-cols-3 gap-2">
+                                            <SettingsButton active={theme === 'light'} onClick={() => setTheme('light')} icon={Icons.Sun} label="Light" />
+                                            <SettingsButton active={theme === 'dark'} onClick={() => setTheme('dark')} icon={Icons.Moon} label="Dark" />
+                                            <SettingsButton active={theme === 'system'} onClick={() => setTheme('system')} icon={Icons.System} label="System" />
+                                        </div>
+                                    </div>
+                                    
+                                    {/* 语言设置 */}
+                                    <div>
+                                        <div className="text-[10px] text-gray-400 dark:text-gray-500 font-bold mb-2 uppercase">{t('language')}</div>
+                                        <div className="grid grid-cols-3 gap-2">
+                                            <SettingsButton active={lang === 'zh'} onClick={() => setLang('zh')} label="中" />
+                                            <SettingsButton active={lang === 'en'} onClick={() => setLang('en')} label="EN" />
+                                            <SettingsButton active={lang === 'jp'} onClick={() => setLang('jp')} label="JP" />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* 设置按钮 & 版权 */}
+                            <div className="flex items-center justify-between">
+                                <span className="text-[10px] text-gray-400 dark:text-dark-textsec">{t('footer')}</span>
+                                <button 
+                                    onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+                                    className={`p-1.5 rounded-md transition-colors ${isSettingsOpen ? 'text-bili bg-bili-light dark:bg-bili/10' : 'text-gray-400 dark:text-dark-textsec hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5'}`}
+                                >
+                                    <Icons.Gear />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* --- 右侧主内容区域 --- */}
+                    <div className="flex-1 flex flex-col h-screen overflow-hidden bg-gray-50 dark:bg-dark-bg transition-colors duration-300">
+                        <div className="flex-1 p-4 sm:p-6 overflow-hidden flex flex-col">
+                            <div className="bg-white dark:bg-dark-card rounded-xl shadow-sm border border-gray-200 dark:border-dark-border flex flex-col h-full overflow-hidden w-full max-w-6xl mx-auto transition-colors duration-300">
+                                
+                                {/* 工具栏 Header */}
+                                <div className="px-6 py-4 border-b border-gray-100 dark:border-dark-border bg-white dark:bg-dark-card flex flex-col sm:flex-row justify-between items-center gap-4 flex-shrink-0 transition-colors duration-300">
+                                    <div className="flex items-center gap-2">
+                                        <h2 className="text-lg font-bold text-gray-800 dark:text-dark-text">{t('listTitle')}</h2>
+                                        {hasFiles && (
+                                            <span className="bg-bili-light dark:bg-bili/10 text-bili text-xs px-2 py-0.5 rounded-full font-medium border border-bili/20 dark:border-bili/30">
+                                                {t('fileCount', {n: files.length})}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="flex gap-3">
+                                        <button onClick={() => fileInputRef.current.click()} disabled={isConverting} className="px-4 py-2 text-sm text-gray-700 dark:text-gray-200 bg-white dark:bg-dark-bg border border-gray-300 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-white/5 rounded-lg shadow-sm transition flex items-center gap-2">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                                            {t('addFile')}
+                                        </button>
+                                        {selectedIds.size > 0 && (
+                                            <button onClick={removeSelected} disabled={isConverting} className="px-4 py-2 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 hover:bg-red-100 dark:hover:bg-red-500/20 rounded-lg shadow-sm transition flex items-center gap-2">
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                                {t('delete', {n: selectedIds.size})}
+                                            </button>
+                                        )}
+                                        {idleCount > 0 && (
+                                            <button onClick={startConversion} disabled={isConverting} className={`px-5 py-2 text-sm font-medium text-white rounded-lg shadow-md transition flex items-center gap-2 ${isConverting ? 'bg-bili/70 cursor-wait' : 'bg-bili hover:bg-bili-hover'}`}>
+                                                {isConverting ? <><div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>{t('processing')}</> : <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>{t('start', {n: idleCount})}</>}
+                                            </button>
+                                        )}
+                                        {successCount > 0 && idleCount === 0 && !isConverting && (
+                                            <button onClick={downloadZip} className="px-5 py-2 text-sm font-medium text-white bg-green-500 hover:bg-green-600 rounded-lg shadow-md transition flex items-center gap-2 animate-pulse-once">
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                                {t('download')}
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* 文件列表 */}
+                                {hasFiles ? (
+                                    <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-dark-card" 
+                                        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                                        onDragLeave={() => setIsDragging(false)} 
+                                        onDrop={(e) => { e.preventDefault(); setIsDragging(false); if(e.dataTransfer.files.length) addFilesToQueue(e.dataTransfer.files); }}
+                                    >
+                                        <div className="flex items-center px-6 py-3 bg-gray-50 dark:bg-dark-bg/50 border-b border-gray-100 dark:border-dark-border text-xs text-gray-500 dark:text-gray-400 font-bold uppercase tracking-wider">
+                                            <div className="w-10 flex justify-center flex-shrink-0"><input type="checkbox" className="custom-checkbox" checked={isAllSelected} onChange={toggleSelectAll} /></div>
+                                            <div className="w-12 text-center flex-shrink-0">{t('headerSeq')}</div>
+                                            <div className="flex-1 px-4">{t('headerName')}</div>
+                                            <div className="w-24 text-right px-4 hidden sm:block">{t('headerSize')}</div>
+                                            <div className="w-28 text-center px-4">{t('headerStatus')}</div>
+                                            <div className="w-16 text-center">{t('headerAction')}</div>
+                                        </div>
+                                        <div className="flex-1 overflow-y-auto relative">
+                                             {isDragging && <div className="absolute inset-0 bg-bili/10 border-4 border-bili border-dashed z-10 flex items-center justify-center backdrop-blur-sm"><div className="bg-white dark:bg-dark-card px-6 py-3 rounded-full shadow-xl font-bold text-bili">{t('dropTitle')}</div></div>}
+                                            {files.map((file, idx) => (
+                                                <div 
+                                                    key={file.id} 
+                                                    className={`file-row flex items-center px-6 py-3 border-b border-gray-100 dark:border-dark-border text-sm group ${selectedIds.has(file.id) ? 'selected' : ''} cursor-default`}
+                                                    onClick={(e) => { if (e.target.type !== 'checkbox' && !e.target.closest('button')) toggleSelectOne(file.id); }}
+                                                    onDoubleClick={() => handleDoubleClick(file)}
+                                                >
+                                                    <div className="w-10 flex justify-center flex-shrink-0"><input type="checkbox" className="custom-checkbox" checked={selectedIds.has(file.id)} onChange={() => toggleSelectOne(file.id)} /></div>
+                                                    <div className="w-12 text-center flex-shrink-0 text-gray-400 dark:text-gray-600 font-mono text-xs">{idx + 1}</div>
+                                                    <div className="flex-1 px-4 min-w-0 flex items-center gap-3">
+                                                        <div className="p-1.5 rounded bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-gray-400"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></div>
+                                                        <div className="truncate flex-1"><p className="font-medium text-gray-700 dark:text-gray-200 truncate" title={file.originalName}>{file.originalName}</p></div>
+                                                    </div>
+                                                    <div className="w-24 text-right px-4 text-gray-400 dark:text-gray-500 text-xs font-mono hidden sm:block flex-shrink-0">{file.size}</div>
+                                                    <div className="w-28 text-center px-4 flex-shrink-0">
+                                                         {file.status === 'idle' && <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 dark:bg-white/10 text-gray-800 dark:text-gray-300">{t('statusIdle')}</span>}
+                                                         {file.status === 'processing' && <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-bili-light dark:bg-bili/20 text-bili animate-pulse">{t('statusProcessing')}</span>}
+                                                         {file.status === 'success' && <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400">{t('statusSuccess')}</span>}
+                                                         {file.status === 'error' && <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400">{t('statusError')}</span>}
+                                                    </div>
+                                                    <div className="w-16 flex justify-center flex-shrink-0">
+                                                        <button onClick={(e) => { e.stopPropagation(); removeFile(file.id); }} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition opacity-0 group-hover:opacity-100 focus:opacity-100"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="px-6 py-3 bg-gray-50 dark:bg-dark-bg/50 border-t border-gray-100 dark:border-dark-border text-xs text-gray-500 dark:text-gray-400 flex justify-between items-center flex-shrink-0">
+                                            <span>{selectedIds.size > 0 ? <span className="font-semibold text-bili">{t('selectedMsg', {n: selectedIds.size})}</span> : t('totalMsg', {n: files.length})}</span>
+                                            {files.length > 0 && <button onClick={clearAll} className="hover:text-red-600 dark:hover:text-red-400 transition underline decoration-dotted">{t('clear')}</button>}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className={`flex-1 flex flex-col items-center justify-center border-2 border-dashed m-8 rounded-xl cursor-pointer transition-all ${isDragging ? 'border-bili bg-bili-light dark:bg-bili/10' : 'border-gray-300 dark:border-dark-border hover:border-bili hover:bg-bili-light/20 dark:hover:bg-bili/5'}`} onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={(e) => { e.preventDefault(); setIsDragging(false); if(e.dataTransfer.files.length) addFilesToQueue(e.dataTransfer.files); }} onClick={() => fileInputRef.current.click()}>
+                                        <input type="file" multiple ref={fileInputRef} className="hidden" accept=".md" onChange={(e) => { addFilesToQueue(e.target.files); e.target.value = ''; }} />
+                                        <div className="w-20 h-20 bg-bili-light dark:bg-bili/10 text-bili rounded-full flex items-center justify-center mb-6"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
+                                        <h3 className="text-xl font-bold text-gray-800 dark:text-dark-text mb-2">{t('dropTitle')}</h3>
+                                        <p className="text-gray-500 dark:text-gray-400">{t('dropSub')}</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
