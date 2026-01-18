@@ -6,7 +6,7 @@
 
 
 
-<img src="main.png" width="800" />
+<img src="main.jpg" width="800" />
 
 
 
