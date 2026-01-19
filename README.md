@@ -28,6 +28,11 @@ A lightweight, local-first utility for transforming GPT chat transcripts into cl
 - Removes UI noise and platform-specific formatting
 - Keeps the conversation structure intact for reading or archiving
 
+## Background
+
+This tool focuses on restoring GPT chat transcripts exported via plugins into a readable format that closely matches the original GPT interface.
+It exists as a practical alternative when the official export process is slow, unreliable, or unsuitable for segmented workflows.
+
 ## Scope
 
 This tool is currently designed and tested specifically for GPT chat transcripts.  
@@ -64,6 +69,15 @@ GPT のチャット履歴を、振り返りや保存に適した、
 - UI ノイズやプラットフォーム固有の形式を除去
 - 会話構造を保ったまま整理・保存が可能
 
+## 背景
+本ツールは、ブラウザプラグイン経由でエクスポートされた  
+GPT のチャット履歴を、元の GPT インターフェースに近い形で  
+読みやすく復元することを目的としています。
+
+公式のエクスポート手順が遅い、安定しない、  
+またはウィンドウ単位・分割での利用に適さない場合の  
+実用的な代替手段として作成されています。
+
 ## 対応範囲
 
 本ツールは現在、GPT のチャット履歴のみを対象として  
@@ -99,6 +113,13 @@ GPT のチャット履歴を貼り付け、または読み込むことで
 - 将 GPT 聊天记录转换为纯文本或 Markdown
 - 去除界面噪音与平台相关的格式
 - 保留对话的基本结构，便于阅读或存档
+
+## 背景说明
+该工具主要用于将通过浏览器插件导出的 GPT 聊天记录，  
+还原为接近 GPT 原始界面的可读格式。
+
+它的存在是为了在官方导出流程较慢、不稳定，  
+或不适合按窗口、分段导出的情况下，提供一种更实用的替代方式。
 
 ## 使用范围
 
